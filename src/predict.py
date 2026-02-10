@@ -53,7 +53,7 @@ def main() -> None:
 
     cat_cardinalities = artifacts.cat_encoder.cardinalities(cat_features)
     model_type = cfg.get("model", {}).get("type", "transformer")
-    if model_type in ("gbdt", "auto"):
+    if model_type in ("gbdt", "auto", "extra_trees"):
         gbdt = load_gbdt(args.model)
         x = np.concatenate(
             [x_num, x_num_mask, x_cat.astype(np.float32)],

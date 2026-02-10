@@ -10,17 +10,26 @@ from sklearn.metrics import mean_absolute_error
 from src.gbdt import train_gbdt
 
 
+def train_extra_trees(x_train: np.ndarray, y_train: np.ndarray, cfg: Dict) -> ExtraTreesRegressor:
+    params = cfg.get("model", {}).get("extra_trees", {})
+    model = ExtraTreesRegressor(
+        n_estimators=params.get("n_estimators", 400),
+        max_depth=params.get("max_depth", None),
+        min_samples_leaf=params.get("min_samples_leaf", 5),
+        min_samples_split=params.get("min_samples_split", 2),
+        max_features=params.get("max_features", 1.0),
+        bootstrap=params.get("bootstrap", False),
+        random_state=cfg.get("seed", 42),
+        n_jobs=params.get("n_jobs", -1),
+    )
+    return model.fit(x_train, y_train)
+
+
 def _fit_candidate(name: str, x_train: np.ndarray, y_train: np.ndarray, cfg: Dict):
     if name == "gbdt":
         return train_gbdt(x_train, y_train, cfg)
     if name == "extra_trees":
-        return ExtraTreesRegressor(
-            n_estimators=400,
-            max_depth=None,
-            min_samples_leaf=5,
-            random_state=cfg.get("seed", 42),
-            n_jobs=-1,
-        ).fit(x_train, y_train)
+        return train_extra_trees(x_train, y_train, cfg)
     if name == "random_forest":
         return RandomForestRegressor(
             n_estimators=400,

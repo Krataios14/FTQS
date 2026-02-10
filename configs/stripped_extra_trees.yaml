@@ -1,0 +1,43 @@
+seed: 42
+
+data:
+  train_csv: data/processed_train.csv
+  target: fracture_toughness_mpa_m0_5
+  schema_json: data/schema.json
+  numerical_features: []
+  categorical_features: []
+  target_transform: log1p
+  target_standardize: true
+  group_columns:
+    - processing_history
+    - phase
+    - material_condition
+  min_non_null_fraction: 0.05
+  min_non_zero_fraction: 0.02
+  min_known_numeric: 8
+  segment_columns:
+    - phase
+    - material_condition
+  min_segment_rows: 30
+  val_split: 0.15
+  num_workers: 0
+
+model:
+  type: extra_trees
+  extra_trees:
+    # Locked to the best-run defaults used in auto selection.
+    n_estimators: 400
+    max_depth: null
+    min_samples_leaf: 5
+    min_samples_split: 2
+    max_features: 1.0
+    bootstrap: false
+    n_jobs: -1
+
+outputs:
+  run_dir: runs
+  best_model: best_model.joblib
+  scaler: scaler.joblib
+  encoder: encoder.joblib
+  metrics: metrics.json
+  figures_dir: reports/figures

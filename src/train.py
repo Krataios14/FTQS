@@ -16,7 +16,7 @@ from torch.optim.swa_utils import AveragedModel, SWALR
 from src.config import load_config
 from src.data import datasets_to_arrays, load_data, save_artifacts
 from src.gbdt import save_gbdt, train_gbdt
-from src.models_auto import train_auto
+from src.models_auto import train_auto, train_extra_trees
 from src.model import FTTransformerModel
 from src.schema import apply_schema
 from src.utils import ensure_dir, get_device, save_json, set_seed, timestamp
@@ -91,6 +91,20 @@ def train_from_config(cfg: Dict) -> str:
             {"best_val_loss": None, "model_type": model_name, "val_mae": model_mae},
             metrics_path,
         )
+        return run_dir
+
+    if model_type == "extra_trees":
+        x_train, y_train, x_val, y_val = datasets_to_arrays(train_ds, val_ds)
+        model = train_extra_trees(x_train, y_train, cfg)
+        best_path = os.path.join(run_dir, cfg["outputs"]["best_model"])
+        save_gbdt(model, best_path)
+        save_artifacts(
+            artifacts,
+            scaler_path=os.path.join(run_dir, cfg["outputs"]["scaler"]),
+            encoder_path=os.path.join(run_dir, cfg["outputs"]["encoder"]),
+        )
+        metrics_path = os.path.join(run_dir, cfg["outputs"]["metrics"])
+        save_json({"best_val_loss": None, "model_type": "extra_trees"}, metrics_path)
         return run_dir
 
     if model_type == "gbdt":

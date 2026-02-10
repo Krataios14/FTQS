@@ -133,7 +133,7 @@ def evaluate_from_config(cfg: Dict, run_dir: str) -> Dict:
     model_type = cfg.get("model", {}).get("type", "transformer")
     model_path = os.path.join(run_dir, cfg["outputs"]["best_model"])
 
-    if model_type in ("gbdt", "auto"):
+    if model_type in ("gbdt", "auto", "extra_trees"):
         model = load_gbdt(model_path)
         x_val = np.concatenate(
             [
