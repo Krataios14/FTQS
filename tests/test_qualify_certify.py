@@ -34,10 +34,36 @@ def test_model_card_contents(pipeline):
     assert card["training_data"]["n_specimens"] > 100
     assert card["training_data"]["n_groups"] > 10
     assert card["model_selection"]["selected"] in {"ridge", "gbdt"}
-    ev = card["calibration_evidence"]["alpha_0.10"]
-    # Finite-sample guarantee is >= 0.8; allow slack for small eval splits
-    assert ev["empirical_coverage"] >= 0.7
-    assert ev["mean_interval_width"] > 0
+    ev = card["calibration_evidence"]
+    e90 = ev["per_alpha"]["alpha_0.10"]
+    assert e90["empirical_coverage"] >= 0.7
+    assert e90["mean_width"] > 0
+    # Honest floor: strictly below the often-quoted 1 - 2*alpha
+    assert 0 < e90["provable_floor_rowlevel"] < 0.80
+    lo_ci, hi_ci = e90["coverage_ci95"]
+    assert lo_ci <= e90["empirical_coverage"] <= hi_ci
+    # Audit exists at the pre-registered alpha and flags thin strata
+    audit = ev["audit"]
+    assert "phase_bin" in audit and "geometry" in audit
+    for levels in audit.values():
+        for entry in levels.values():
+            assert {"n", "n_groups", "covered", "insufficient"} <= set(entry)
+    # Selection-inclusive protocol recorded per split
+    assert len(ev["selected_per_split"]) == ev["n_splits"]
+    # Mondrian bins with per-bin honest floors
+    bins = card["conformal"]["bins"]
+    assert "__pooled__" in bins
+    assert all(0 <= b["provable_floor"] < 0.8 for b in bins.values())
+    # Replicate scatter decomposition present and physically sane
+    scatter = card["replicate_scatter"]
+    assert scatter["n_replicated_conditions"] >= 3
+    assert scatter["between_lab_std_log"] > 0.1  # real, substantial scatter
+    # OOF permutation importance ranked
+    top = card["permutation_importance"]["top"]
+    assert len(top) >= 5
+    assert top[0][1] >= top[-1][1]
+    # Subsampled hierarchical reference present
+    assert 0 <= card["reference_subsampled"]["empirical_coverage"] <= 1
 
 
 def test_certify_outputs(pipeline):

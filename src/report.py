@@ -72,25 +72,79 @@ def _interval_figure(df: pd.DataFrame) -> Optional[str]:
 
 def _calibration_figure(model_card: Dict) -> Optional[str]:
     evidence = model_card.get("calibration_evidence", {})
-    if not evidence:
+    per_alpha = evidence.get("per_alpha", {})
+    if not per_alpha:
         return None
-    labels, nominal, empirical = [], [], []
-    for key, ev in sorted(evidence.items()):
-        labels.append(f"{int(round(ev['nominal_coverage'] * 100))}% interval")
-        nominal.append(ev["nominal_coverage"])
-        empirical.append(ev["empirical_coverage"])
-    x = np.arange(len(labels))
-    fig, ax = plt.subplots(figsize=(4.6, 3.4))
-    w = 0.35
-    ax.bar(x - w / 2, nominal, w, label="nominal", color="#7f8c9b")
-    ax.bar(x + w / 2, empirical, w, label="empirical (held-out groups)", color="#2c6fbb")
-    ax.set_xticks(x, labels)
-    ax.set_ylim(0, 1.05)
+    entries = sorted(per_alpha.values(), key=lambda e: e["nominal_coverage"])
+    nominal = [e["nominal_coverage"] for e in entries]
+    empirical = [e["empirical_coverage"] for e in entries]
+    ci_lo = [e["empirical_coverage"] - e["coverage_ci95"][0] for e in entries]
+    ci_hi = [e["coverage_ci95"][1] - e["empirical_coverage"] for e in entries]
+    floors = [e.get("provable_floor_rowlevel", 0.0) for e in entries]
+
+    fig, ax = plt.subplots(figsize=(4.8, 3.8))
+    ax.plot([0.5, 1.0], [0.5, 1.0], color="#aab4be", lw=1, ls="--", label="nominal")
+    ax.errorbar(
+        nominal, empirical, yerr=[ci_lo, ci_hi], fmt="o", ms=5, capsize=3,
+        color="#2c6fbb", label="empirical (held-out groups, 95% CI)",
+    )
+    ax.plot(nominal, floors, "v", ms=6, color="#c0392b", label="provable floor (row-level)")
+    ax.set_xlabel("nominal coverage")
     ax.set_ylabel("coverage")
-    ax.legend(fontsize=8)
-    ax.grid(axis="y", alpha=0.25)
-    fig.suptitle("Calibration on unseen material systems", fontsize=11)
+    ax.set_xlim(0.6, 1.0)
+    ax.set_ylim(0.3, 1.02)
+    ax.legend(fontsize=7.5, loc="lower right")
+    ax.grid(alpha=0.25)
+    fig.suptitle("Calibration spectrum, selection-inclusive", fontsize=11)
     return _fig_to_b64(fig)
+
+
+def _importance_figure(model_card: Dict) -> Optional[str]:
+    imp = model_card.get("permutation_importance", {})
+    top = imp.get("top", [])
+    if not top:
+        return None
+    names = [t[0] for t in top][:12][::-1]
+    vals = [t[1] for t in top][:12][::-1]
+    fig, ax = plt.subplots(figsize=(4.8, 3.8))
+    ax.barh(names, vals, color="#3a6b8a")
+    ax.set_xlabel("OOF MAE increase when permuted")
+    ax.tick_params(axis="y", labelsize=7.5)
+    ax.grid(axis="x", alpha=0.25)
+    fig.suptitle("Out-of-fold permutation importance", fontsize=11)
+    return _fig_to_b64(fig)
+
+
+def _audit_table(model_card: Dict) -> str:
+    evidence = model_card.get("calibration_evidence", {})
+    audit = evidence.get("audit", {})
+    if not audit:
+        return ""
+    alpha = evidence.get("audit_alpha", 0.1)
+    rows = []
+    for stratum, levels in audit.items():
+        for level, e in levels.items():
+            if e.get("insufficient"):
+                cov = "insufficient data"
+                ci = "&ndash;"
+            else:
+                cov = f"{e['coverage'] * 100:.0f}%"
+                ci = f"[{e['coverage_ci95'][0] * 100:.0f}, {e['coverage_ci95'][1] * 100:.0f}]%"
+            rows.append(
+                f"<tr><td>{html.escape(stratum)}</td><td>{html.escape(str(level))}</td>"
+                f"<td>{e['n']}</td><td>{e['n_groups']}</td><td>{cov}</td><td>{ci}</td></tr>"
+            )
+    return (
+        f"<h2>Conditional coverage audit ({int((1 - alpha) * 100)}% intervals)</h2>"
+        '<p style="font-size:12.5px;color:#445;">Coverage of the held-out-group evidence '
+        "broken out by fixed specimen attributes. Rows within one publication are "
+        "correlated, so the group counts are the better guide to information content. "
+        "Strata with too few rows or groups are flagged rather than scored.</p>"
+        "<table><thead><tr><th>stratum</th><th>level</th><th>rows</th><th>groups</th>"
+        "<th>coverage</th><th>95% CI</th></tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table>"
+    )
 
 
 def _tier_chip(tier: str) -> str:
@@ -168,10 +222,11 @@ def render_report(
     tier_counts = predictions["trust_tier"].value_counts().to_dict()
     td = model_card.get("training_data", {})
     ev = model_card.get("calibration_evidence", {})
-    ev90 = ev.get("alpha_0.10", {})
+    ev90 = ev.get("per_alpha", {}).get("alpha_0.10", ev.get("alpha_0.10", {}))
 
     interval_b64 = _interval_figure(predictions)
     calib_b64 = _calibration_figure(model_card)
+    imp_b64 = _importance_figure(model_card)
 
     cards = f"""
     <div class="cards">
@@ -189,7 +244,21 @@ def render_report(
         figs += f'<img src="data:image/png;base64,{interval_b64}" alt="intervals"/>'
     if calib_b64:
         figs += f'<img src="data:image/png;base64,{calib_b64}" alt="calibration"/>'
+    if imp_b64:
+        figs += f'<img src="data:image/png;base64,{imp_b64}" alt="importance"/>'
     figs += "</div>"
+
+    scatter = model_card.get("replicate_scatter", {})
+    scatter_note = ""
+    if scatter and np.isfinite(scatter.get("between_lab_std_log", float("nan"))):
+        scatter_note = (
+            '<p style="font-size:12.5px;color:#445;">Replicate scatter on this dataset: '
+            f"within-lab {scatter.get('within_lab_std_log', float('nan')):.2f} vs between-lab "
+            f"{scatter.get('between_lab_std_log', float('nan')):.2f} log-units across "
+            f"{scatter.get('n_replicated_conditions', 0)} replicated conditions. "
+            "The between-lab part is irreducible at query time: nominally identical "
+            "alloys from different labs genuinely differ by this much.</p>"
+        )
 
     selected = model_card.get("model_selection", {}).get("selected", "?")
     method = model_card.get("conformal", {}).get("method", "?")
@@ -211,11 +280,16 @@ def render_report(
 
 <h2>Predictions and conformal bounds</h2>
 {figs}
-<p style="font-size:12.5px;color:#445;">Bounds are group-aware CV+ conformal intervals.
-At the 90% level they carry a finite-sample coverage guarantee of at least 80%
-under group exchangeability, with empirical held-out-group coverage shown above.
-Tier C rows fall outside the training distribution; their bounds should not be relied on.</p>
+<p style="font-size:12.5px;color:#445;">Bounds are Mondrian group-aware CV+ conformal
+intervals, calibrated separately for the brittle and ductile phase classes. The provable
+row-level floor at each level is shown in the calibration figure (it is below the nominal
+level by a finite-sample excess); group-level validity is supported by the held-out-group
+evidence, which re-runs model selection inside every split. Tier C rows fall outside the
+training distribution; their bounds should not be relied on.</p>
+{scatter_note}
 {_predictions_table(predictions)}
+
+{_audit_table(model_card)}
 
 <h2>Model card</h2>
 <pre>{html.escape(__import__('json').dumps(model_card, indent=2))}</pre>

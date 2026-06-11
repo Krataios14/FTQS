@@ -67,7 +67,12 @@ def pipeline(tmp_path_factory):
             "min_non_zero_fraction": 0.02,
         },
         "model": {"auto": {"candidates": ["ridge", "gbdt"]}},
-        "conformal": {"n_folds": 5, "eval_splits": 3, "trust_neighbors": 5},
+        "conformal": {
+            "n_folds": 5,
+            "eval_splits": 3,
+            "trust_neighbors": 5,
+            "selection_seeds": 1,
+        },
         "outputs": {
             "run_dir": str(tmp / "runs"),
             "scaler": "scaler.joblib",

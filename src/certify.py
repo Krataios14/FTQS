@@ -27,9 +27,10 @@ import numpy as np
 import pandas as pd
 
 from src.applicability import TrustModel
+from src.conformal import MondrianCVPlus
 from src.data import load_artifacts
 from src.physics import add_physics_features
-from src.qualify import build_matrix, make_inverse_transform
+from src.qualify import build_matrix, compute_bins, make_inverse_transform
 
 IDENTITY_COLS = [
     "composition_at_percent",
@@ -95,17 +96,30 @@ def certify_dataframe(
     )
     inv = make_inverse_transform(artifacts, features.get("target_standardize", False))
 
-    preds = inv(run["conformal"].predict(X))
+    model = run["conformal"]
     out = pd.DataFrame(index=df.index)
     for col in IDENTITY_COLS:
         if col in df.columns:
             out[col] = df[col]
+    if isinstance(model, MondrianCVPlus):
+        bins = compute_bins(df)
+        out["phase_bin"] = bins
+        preds = inv(model.predict(X, bins))
+        intervals = model.predict_interval_multi(X, list(alphas), bins)
+    else:
+        preds = inv(model.predict(X))
+        intervals = model.predict_interval_multi(X, list(alphas))
     out["predicted_toughness_mpa_m0_5"] = preds
+    unbounded = np.zeros(len(df), dtype=bool)
     for alpha in alphas:
-        lo, hi = run["conformal"].predict_interval(X, alpha=alpha)
+        lo, hi = intervals[alpha]
         level = int(round((1 - alpha) * 100))
-        out[f"lower_{level}"] = np.maximum(inv(lo), 0.0)
-        out[f"upper_{level}"] = inv(hi)
+        lo_inv, hi_inv = inv(lo), inv(hi)
+        unbounded |= ~np.isfinite(lo_inv) | ~np.isfinite(hi_inv)
+        out[f"lower_{level}"] = np.where(np.isfinite(lo_inv), np.maximum(lo_inv, 0.0), 0.0)
+        out[f"upper_{level}"] = hi_inv
+    if unbounded.any():
+        out["interval_unbounded"] = unbounded
 
     trust_df = run["trust"].score(X)
     out = pd.concat([out, trust_df[["trust_score", "trust_tier"]]], axis=1)
