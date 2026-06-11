@@ -56,8 +56,13 @@ def test_model_card_contents(pipeline):
     assert all(0 <= b["provable_floor"] < 0.8 for b in bins.values())
     # Replicate scatter decomposition present and physically sane
     scatter = card["replicate_scatter"]
-    assert scatter["n_replicated_conditions"] >= 3
-    assert scatter["between_lab_std_log"] > 0.1  # real, substantial scatter
+    assert scatter["between_lab_any_condition"]["n_clusters"] >= 3
+    assert scatter["between_lab_any_condition"]["std_log"] > 0.1
+    # Pure repeatability must be smaller than the cross-lab spread
+    assert (
+        scatter["within_lab"]["std_log"]
+        < scatter["between_lab_any_condition"]["std_log"]
+    )
     # OOF permutation importance ranked
     top = card["permutation_importance"]["top"]
     assert len(top) >= 5

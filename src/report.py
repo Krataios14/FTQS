@@ -250,14 +250,17 @@ def render_report(
 
     scatter = model_card.get("replicate_scatter", {})
     scatter_note = ""
-    if scatter and np.isfinite(scatter.get("between_lab_std_log", float("nan"))):
+    between = scatter.get("between_lab_any_condition", {})
+    within = scatter.get("within_lab", {})
+    if between and np.isfinite(between.get("std_log", float("nan"))):
         scatter_note = (
             '<p style="font-size:12.5px;color:#445;">Replicate scatter on this dataset: '
-            f"within-lab {scatter.get('within_lab_std_log', float('nan')):.2f} vs between-lab "
-            f"{scatter.get('between_lab_std_log', float('nan')):.2f} log-units across "
-            f"{scatter.get('n_replicated_conditions', 0)} replicated conditions. "
-            "The between-lab part is irreducible at query time: nominally identical "
-            "alloys from different labs genuinely differ by this much.</p>"
+            f"within-lab repeatability {within.get('std_log', float('nan')):.2f} log-units "
+            f"({within.get('n_replicate_sets', 0)} replicate sets) vs "
+            f"{between.get('std_log', float('nan')):.2f} log-units between labs at matched "
+            f"composition and temperature ({between.get('n_clusters', 0)} clusters, processing "
+            "free to differ). The between-lab part is irreducible at query time: nominally "
+            "identical alloys from different labs genuinely differ by this much.</p>"
         )
 
     selected = model_card.get("model_selection", {}).get("selected", "?")

@@ -39,6 +39,18 @@ folds at the level of publication plus composition, which is the level
 at which a new query is actually new. As far as we know no other
 materials property tool does this.
 
+Calibration is also done separately for the brittle and ductile phase
+classes (a Mondrian split fixed on ductile-to-brittle-transition
+physics, never tuned on results): pooled calibration would let
+over-coverage on tough FCC alloys subsidize under-coverage on brittle
+intermetallics. And the guarantee language is exact rather than
+generous: the model card reports the real Barber et al. Theorem 4
+floor, which at this sample size is about 0.71 for the nominal 90%
+interval, not the often-quoted 0.80, states that group-level folding
+extends the theorem heuristically, and backs the group-level claim
+with held-out-publication evidence plus a provably valid subsampled
+reference (one row per publication, Dunn et al. 2022).
+
 ### Physics features
 
 Raw composition strings are converted to descriptors with established
@@ -56,7 +68,7 @@ coordinates.
 
 ## The data
 
-The bundled dataset has 162 records (147 training, 15 held-out) built
+The bundled dataset has 162 records (146 training, 16 held-out) built
 from two committed sources by `python -m src.ingest_fan2023`:
 
 - the full fracture toughness sheet of Fan et al., "Dataset for
@@ -66,45 +78,61 @@ from two committed sources by `python -m src.ingest_fan2023`:
   `assets/fan2023_hea_toughness.xlsx`. All 148 records are used: 131
   K_IC, 17 K_Q, including the refractory NbTaTiZr-Mo and NbTaTiV
   series tested between 77 K and 226 K that the earlier CSV dropped.
-  The measure type (K_IC, K_Q, or J-converted) is kept as a model
-  feature, and the reported measurement uncertainty is carried as
-  metadata.
+  The measure type (K_IC, K_Q, or J-converted) and the specimen
+  geometry class are model features; the geometry matters because 77
+  of the 148 source records are indentation-derived toughness, a
+  different measurand from fracture-mechanics specimens. Reported
+  measurement uncertainties are carried as metadata.
 - `assets/manual_records.csv`: 14 hand-collected records (steels from
   Ritchie 1976 and supplier datasheets, cryogenic CoCrNi and
   CoCrFeMnNi, WC-Co hardmetals) that are not in the source dataset.
+- the same spreadsheet's Charpy sheets are ingested as companion
+  assets (78 impact energy and 14 impact toughness records), not yet
+  modeled.
 
-The unseen split is pinned by `assets/unseen_keys.json`, so dataset
-revisions stay comparable. J values convert to K via
+The unseen split is pinned at the group level by
+`assets/unseen_groups.json` and the ingest enforces zero
+publication+composition overlap between the two sides, so the held-out
+set really is new material systems. J values convert to K via
 K = sqrt(J*E/(1-nu^2)) with nu = 0.3, only when the record reports a
 modulus.
 
 ## How the numbers hold up
 
-Measured on the bundled dataset (147 training specimens from 90
-publication/composition groups, toughness from 0.2 to 459 MPa m^0.5,
-test temperatures from 20 K to 1298 K), with whole groups held out so
-the model is always scored on material systems it has never seen:
+Selection-inclusive evidence: every held-out-group split re-runs the
+model selection, so the numbers describe the full pipeline including
+its data-driven choices. Measured on the bundled dataset (146 training
+specimens from 83 publication/composition groups, toughness from 0.2
+to 459 MPa m^0.5, test temperatures from 20 K to 1298 K):
 
 | Quantity | Value |
 | --- | --- |
-| 90% interval, empirical coverage on held-out groups | 95.3% (guarantee: >= 80%) |
-| 95% interval, empirical coverage on held-out groups | 98.4% (guarantee: >= 90%) |
-| Point MAE on held-out groups | 35.3 MPa m^0.5 |
-| R2 on held-out groups | 0.27 |
-| Bundled unseen set (15 specimens), measured value inside 90% bounds | 11 of 15 |
+| 90% interval coverage, held-out groups, pooled over 8 splits | 91.4% (95% CI 87 to 95) |
+| 95% interval coverage, same protocol | 97.0% (95% CI 94 to 99) |
+| Provable row-level floor at the 90% level (Thm 4, n=146, K=8) | 71% |
+| Subsampled one-row-per-publication reference, 90% level | 95.3% coverage |
+| Point MAE / R2 on held-out groups | 21.9 MPa m^0.5 / 0.58 |
+| Pinned unseen set (16 rows, 11 disjoint groups), inside 90% bounds | 13 of 16 |
 
-Two things deserve a plain statement. First, point accuracy got worse
-when the refractory K_Q series was added, because held-out-group
-evaluation now includes whole alloy families the model has to
-extrapolate to; the conformal intervals widened to compensate, which
-is the design working as intended. Second, the four unseen misses are
-all nominally identical Al20-Co20-Cr20-Fe20-Ni20 specimens whose
-measured values span 1.0 to 10.6 MPa m^0.5 across different labs and
-processing routes. That spread is in the source literature itself, and
-no composition-based model can resolve it. Every qualification run
-recomputes this table for the current data and writes it into the
-model card, so the calibration claim is always backed by the artifact
-in front of you, not by this README.
+The conditional audit in the model card breaks coverage out by phase
+bin, geometry class, measure type and temperature regime. Its main
+finding right now: coverage below room temperature is 67% (CI 41 to
+87, 18 rows from 5 publications), so sub-RT queries deserve extra
+caution; everything else sits at or above nominal. Of the three unseen
+misses, two are AlCoCrFeNi coatings whose measured 1.0 and 3.9
+MPa m^0.5 sit in a cross-lab scatter band the literature itself spans,
+and one is the cryogenic CoCrNi record (measured 459, the highest
+value in the dataset) where the bound was conservative on the low
+side.
+
+On that scatter: replicates within one paper agree to 0.18 log-units,
+but nominally identical compositions at the same temperature from
+different labs differ by 0.47 log-units once processing varies. That
+between-lab spread is irreducible at query time, it is recorded in
+every model card, and it is the honest context for any complaint that
+the intervals are wide. Every qualification run recomputes this whole
+table for the current data, so the calibration claim is always backed
+by the artifact in front of you, not by this README.
 
 ## Quickstart
 
@@ -112,6 +140,8 @@ in front of you, not by this README.
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
+# or, as an installed package with the `ftqs` command (torch optional):
+# pip install -e .
 
 # 1. featurize the raw tables (writes data/processed_*.csv and data/schema.json)
 python -m src.prepare_data ^
@@ -158,53 +188,69 @@ every page.
 | Column | Meaning |
 | --- | --- |
 | `predicted_toughness_mpa_m0_5` | point estimate |
-| `lower_90` / `upper_90` | conformal bounds, >= 80% guaranteed coverage |
-| `lower_95` / `upper_95` | conformal bounds, >= 90% guaranteed coverage |
+| `phase_bin` | which Mondrian calibration bin the row was routed to |
+| `lower_90` / `upper_90` | conformal bounds; provable floor and measured coverage in the model card |
+| `lower_95` / `upper_95` | same at the 95% level |
+| `interval_unbounded` | set when n is too small for a finite bound at that level |
 | `trust_score` | 0 to 100, distance-based, 100 is deep interpolation |
 | `trust_tier` | A interpolation, B boundary, C extrapolation |
 | `nearest_training_anchors` | closest measured specimens with citations |
 | `test_value_score` (advise mode) | relative interval width times novelty |
+| `min_distance_to_selected` (advise mode) | diversity spacing of the advised batch |
 
 Treat tier C rows as unanswered questions, not as predictions. They are
 the rows the advise mode will usually tell you to test first.
 
 ## Limitations, stated plainly
 
-- 147 training points. The model interpolates a sparse literature
+- 146 training points. The model interpolates a sparse literature
   corpus; it does not know mechanism. The conformal machinery is there
   precisely because the point model is weak.
-- The measure type (K_IC vs K_Q vs J-converted) is a model feature,
-  but specimen size validity criteria are taken as reported by the
-  source papers, not re-checked. J to K conversion assumes plane
-  strain and nu = 0.3.
-- Nominally identical compositions from different labs can differ by
-  10x in measured toughness. The model sees composition, condition,
-  phase and processing text, and cannot resolve what those columns do
-  not encode.
+- The provable coverage floor is 1 - 2*alpha minus a finite-sample
+  excess (about 71% at the nominal 90% level here), under row
+  exchangeability with equal folds; group folding extends it
+  heuristically. The held-out-publication evidence and the subsampled
+  reference are what support the group-level claim.
+- The conditional audit currently shows under-coverage below room
+  temperature (67%, wide CI). Treat sub-RT queries with extra caution
+  until more cryogenic groups exist.
+- Half the source records are indentation-derived toughness, not
+  specimen K_IC; the geometry class feature and audit stratum carry
+  that, but specimen-size validity criteria are taken as reported, not
+  re-checked. J to K conversion assumes plane strain and nu = 0.3.
+- Nominally identical compositions from different labs differ by 0.47
+  log-units (up to roughly 10x in K) once processing varies. The model
+  sees composition, condition, phase and processing text, and cannot
+  resolve what those columns do not encode.
 - Miedema enthalpies are model estimates, rounded, and pairs involving
   N, O, S and Pb are excluded (the coverage fraction is a feature, so
   the model can discount those rows).
-- The coverage guarantee is conditional on group exchangeability. A
-  query from a genuinely different population (a ceramic, a weld, an
+- A query from a genuinely different population (a ceramic, a weld, an
   irradiated steel) gets a tier C flag, and its bounds mean little.
 - Old pipeline entry points (`src.train`, `src.predict`, the segment
   scripts and the FT-Transformer) still work but do not produce
   intervals. Use the qualify/certify path for anything that matters.
 
+The full methodology, with every formula checked against the
+implementation, is in `docs/METHODS.md`.
+
 ## Repository layout
 
 ```
-assets/            source dataset (xlsx), manual records, combined CSVs
+assets/            source dataset (xlsx), manual records, combined CSVs,
+                   Charpy companion assets, pinned unseen groups
 configs/           YAML configs
+docs/METHODS.md    the methodology handbook, formula by formula
 examples/          committed example outputs, incl. the HTML report
 src/ingest_fan2023.py  rebuilds the combined CSVs from the sources
-src/physics.py     composition and mechanics descriptors
-src/conformal.py   group-aware CV+ intervals and calibration checks
+src/physics.py     composition and mechanics descriptors, Mondrian bin rule
+src/conformal.py   group CV+, Mondrian bins, floors, multi-alpha intervals
 src/applicability.py  trust scores, tiers, nearest-neighbour provenance
 src/allowables.py  A-/B-basis tolerance bounds
-src/qualify.py     trains the qualification artifact + model card
+src/qualify.py     qualification artifact, nested evidence, model card
 src/certify.py     batch predictions, CSV + HTML report
-src/screen.py      candidate screening and test prioritisation
+src/screen.py      candidate screening, diversity-aware test advising
+src/cli.py         umbrella CLI (installed as `ftqs`)
 src/train.py       legacy point-estimate training (kept working)
 tests/             pytest suite, runs the real pipeline end to end
 ```
@@ -215,9 +261,10 @@ tests/             pytest suite, runs the real pipeline end to end
 pytest -q
 ```
 
-51 tests, including an end-to-end run of prepare/qualify/certify/screen
+72 tests, including an end-to-end run of prepare/qualify/certify/screen
 on the bundled dataset, the dataset ingest from the source spreadsheet,
-and a subprocess test of the CLI artifact round trip.
+and a subprocess test of the CLI artifact round trip. CI runs the suite
+on every push.
 
 ## References
 
@@ -226,6 +273,8 @@ and a subprocess test of the CLI artifact round trip.
   (2023). Data: Materials Cloud, doi:10.24435/materialscloud:d6-pf.
 - Barber, Candes, Ramdas, Tibshirani. Predictive inference with the
   jackknife+. Annals of Statistics 49(1), 2021.
+- Dunn, Wasserman, Ramdas. Distribution-free prediction sets for
+  two-layer hierarchical models. JASA, 2022.
 - Takeuchi, Inoue. Classification of bulk metallic glasses by atomic
   size difference, heat of mixing and period of constituent elements.
   Materials Transactions 46(12), 2005.

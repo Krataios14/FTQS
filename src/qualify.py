@@ -463,32 +463,67 @@ def replicate_scatter(df: pd.DataFrame, y_raw: np.ndarray) -> Dict[str, object]:
     temp = pd.to_numeric(
         df.get("testing_temperature_k", pd.Series(np.nan, index=df.index)), errors="coerce"
     ).round(0)
+    cond = (
+        df.get("material_condition", pd.Series("", index=df.index))
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.lower()
+    )
     ylog = pd.Series(np.log1p(np.clip(y_raw, 0, None)))
-    cluster = comp.astype(str) + "@" + temp.astype(str)
     valid = (comp != "") & temp.notna()
 
-    within, between = [], []
-    n_clusters = 0
-    for c in sorted(set(cluster[valid])):
-        mask = ((cluster == c) & valid).to_numpy()
-        refs = ref[mask]
-        if refs.nunique() < 2:
-            continue
-        n_clusters += 1
-        means = ylog[mask].groupby(refs.to_numpy()).mean()
-        between.append(float(np.std(means.to_numpy(), ddof=1)))
-        stds = ylog[mask].groupby(refs.to_numpy()).std(ddof=1).dropna()
-        if len(stds):
-            within.append(float(stds.mean()))
+    def _between(cluster: pd.Series) -> Tuple[int, float]:
+        vals, count = [], 0
+        for c in sorted(set(cluster[valid])):
+            mask = ((cluster == c) & valid).to_numpy()
+            refs = ref[mask]
+            if refs.nunique() >= 2:
+                count += 1
+                means = ylog[mask].groupby(refs.to_numpy()).mean()
+                vals.append(float(np.std(means.to_numpy(), ddof=1)))
+        return count, float(np.mean(vals)) if vals else float("nan")
+
+    # Strict replicates: same composition, temperature, condition AND
+    # paper. This is pure repeatability.
+    strict = comp.astype(str) + "@" + temp.astype(str) + "@" + cond + "@" + ref
+    within = []
+    for c in sorted(set(strict[valid])):
+        mask = ((strict == c) & valid).to_numpy()
+        if mask.sum() >= 2:
+            within.append(float(np.std(ylog[mask].to_numpy(), ddof=1)))
+
+    # Cross-lab at matched condition (condition strings rarely match
+    # across papers, so this is usually thin), and cross-lab allowing
+    # processing differences, which is what a real query faces when only
+    # the composition is nominally identical.
+    n_same, between_same = _between(comp.astype(str) + "@" + temp.astype(str) + "@" + cond)
+    n_any, between_any = _between(comp.astype(str) + "@" + temp.astype(str))
+
     return {
-        "n_replicated_conditions": n_clusters,
-        "within_lab_std_log": float(np.mean(within)) if within else float("nan"),
-        "between_lab_std_log": float(np.mean(between)) if between else float("nan"),
+        "within_lab": {
+            "std_log": float(np.mean(within)) if within else float("nan"),
+            "n_replicate_sets": len(within),
+            "meaning": "same paper, composition, temperature and condition",
+        },
+        "between_lab_same_condition": {
+            "std_log": between_same,
+            "n_clusters": n_same,
+            "meaning": "different papers, matched composition, temperature and condition",
+        },
+        "between_lab_any_condition": {
+            "std_log": between_any,
+            "n_clusters": n_any,
+            "meaning": (
+                "different papers, matched composition and temperature, "
+                "processing free to differ; the spread a query with only "
+                "nominal composition information actually faces"
+            ),
+        },
         "units": "log(1 + K) with K in MPa m^0.5",
         "note": (
-            "clusters share composition and test temperature; between-lab "
-            "scatter on nominally identical conditions is irreducible "
-            "aleatoric uncertainty at query time"
+            "the between-lab components are irreducible aleatoric "
+            "uncertainty at query time"
         ),
     }
 

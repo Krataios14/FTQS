@@ -121,15 +121,31 @@ the source measurement.
 
 ### 1.7 The pinned unseen split
 
-The 15-record unseen set is pinned by `assets/unseen_keys.json`, a list
-of `{k, temp, ref_prefix}` keys. `split_unseen` matches each key to at
-most one combined row: the first not-yet-used row whose toughness
-rounds to `k` at two decimals, whose test temperature rounds to `temp`
-at zero decimals, and whose reference string starts with the first 20
-characters of `ref_prefix`. Matched rows become the unseen set, the
-rest the training set. Pinning by value rather than by row index keeps
-the split stable when the dataset is rebuilt or rows are reordered, so
-evaluation numbers stay comparable across dataset revisions.
+The unseen set is pinned at the group level by
+`assets/unseen_groups.json`: a frozen list of (reference prefix |
+composition) group keys, selected once with a fixed seed, stratified
+over the brittle/ductile/unknown phase classes. `split_unseen_groups`
+moves whole groups, and the ingest enforces zero group-key overlap
+between the two output CSVs as a hard invariant.
+
+This replaced an earlier row-level split that leaked 9 group keys
+across the boundary: 11 of the 15 held-out rows had same-publication,
+same-composition siblings in training, which made the unseen
+evaluation an easier task ("new processing condition of a known
+system") than the one the conformal grouping is defined on ("new
+material system"). The current split holds out 16 rows in 11 groups
+that share no publication+composition identity with training.
+
+### 1.8 Specimen geometry class
+
+The source's specimen geometry column is normalized by
+`geometry_class` into a small vocabulary (indentation, bend,
+compact_tension, cantilever, other, unknown). 77 of the 148 source
+records are indentation-derived toughness (Vickers crack methods),
+which is a different measurand from fracture-mechanics specimen
+testing, with its own systematic offsets and scatter. The class is
+carried as a model feature and used as a stratum in the conditional
+coverage audit.
 
 ## 2. Featurization (src/physics.py)
 
@@ -327,8 +343,8 @@ actually new.
 
 ### 4.3 Interval construction
 
-For a test point x, `predict_interval` forms, over all n training
-points,
+For a test point x, `predict_interval_multi` forms, over all n
+training points,
 
     v_lo_i = mu_{-k(i)}(x) - R_i
     v_hi_i = mu_{-k(i)}(x) + R_i
@@ -337,49 +353,99 @@ where `mu_{-k(i)}` is the fold model trained without sample i's fold.
 The bounds are order statistics of these sets. In 1-based terms:
 
 - lower bound: the `floor(alpha * (n + 1))`-th smallest of the v_lo
-  values, never lower-indexed than the 1st;
+  values;
 - upper bound: the `ceil((1 - alpha) * (n + 1))`-th smallest of the
-  v_hi values, capped at the n-th.
+  v_hi values.
 
-In the code (0-based): `i_lo = max(floor(alpha*(n+1)), 1) - 1` and
-`i_hi = min(ceil((1-alpha)*(n+1)), n) - 1` into the sorted arrays. This
-matches the CV+ interval definition in Barber et al.
+When the required index falls outside 1..n (n too small for the
+requested alpha), the bound is -inf or +inf: an honest "no finite
+bound at this confidence". An earlier version clamped to the extreme
+order statistic instead, which is anti-conservative in exactly the
+small-n*alpha regime; the clamping was removed. Multiple alphas are
+computed from a single set of fold predictions; intervals are nested
+across the alpha ladder because the indices are monotone in alpha.
 
-### 4.4 The guarantee
+### 4.4 The guarantee, stated honestly
 
-The CV+ theorem of Barber et al. 2021 (their Theorem 4) gives
-distribution-free finite-sample coverage of at least 1 - 2*alpha for
-any regressor, minus a small additive term for K-fold CV+ that shrinks
-as the per-fold sample count grows (the jackknife+, the K = n case,
-carries no such term, their Theorem 1). FTQS quotes 1 - 2*alpha
-as the working guarantee: the nominal 90% interval (alpha = 0.10) is
-guaranteed at >= 80%, the nominal 95% interval (alpha = 0.05) at
->= 90%. In practice CV+ coverage tends to land near 1 - alpha, and the
-empirical evidence below is what the model card actually reports, so
-the claim never rests on the theorem alone. The guarantee is
-conditional on group exchangeability: a query from a genuinely
-different population is exactly what the applicability domain (section
-5) is there to flag.
+For K-fold CV+ with equal fold sizes and exchangeable rows, Theorem 4
+of Barber et al. 2021 gives distribution-free finite-sample coverage
+of at least
 
-### 4.5 Model selection and held-out-group evaluation
+    1 - 2*alpha - min{ 2(1 - 1/K) / (n/K + 1), (1 - K/n) / (K + 1) }
 
-`qualify` fits a `GroupCVPlus` for each candidate regressor
-(HistGradientBoostingRegressor, ExtraTrees, RandomForest, Ridge) and
-selects by mean out-of-fold absolute residual, i.e. group-CV MAE in
-transformed space. The selection criterion is itself out-of-fold, but
-note the model family is chosen on the full training set; only the
-calibration evidence below involves data the fitted model never saw.
+The excess term is not negligible at this scale: for n = 147 and
+K = 8 it is about 0.09, so the provable floor of the nominal 90%
+interval is about 71%, not the often-quoted 80%. `provable_floor`
+computes and the model card reports this real bound. Two further
+caveats are stated rather than rounded away. Group-level folding makes
+fold sizes unequal, so Theorem 4 applies only heuristically. And under
+a two-layer hierarchical model (publications i.i.d., specimens
+correlated within a publication, the query from a new publication) the
+test row is not exchangeable with training rows at all; the clean
+guarantee in that setting needs one score per group (Dunn, Wasserman &
+Ramdas, JASA 2022), which FTQS provides as a reference via
+`subsample_one_per_group` and reports beside the main evidence.
+Group-level validity of the main intervals is therefore supported
+empirically, by the held-out-publication evidence, with the theorem
+supplying the row-level floor. In practice CV+ coverage lands near
+1 - alpha; the model card reports what was measured.
 
-`evaluate_group_coverage` produces that evidence: for each of 8
-repetitions it draws 20% of the unique groups (at least one) as a test
-set, fits a fresh `GroupCVPlus` on the remaining groups, and measures
-empirical interval coverage, mean width, MAE and (pooled over
-repetitions) R2 on the held-out groups, all reported in MPa m^0.5 via
-the monotone inverse. This measures the deployment condition: whole
-material systems absent from training. The resulting table is written
-into `model_card.json` on every qualification run, so the calibration
-claim is always backed by the artifact at hand rather than by static
-documentation.
+### 4.5 Mondrian binning
+
+`MondrianCVPlus` calibrates the brittle and ductile phase classes
+separately (`physics.brittleness_bin`: FCC-containing alloys are
+ductile-class, everything else brittle-class, missing phase is
+unknown). The two classes have very different toughness scatter, and a
+pooled calibration lets over-coverage on the easy class subsidize
+under-coverage on the hard one. Each bin with at least 30 rows and 8
+groups gets its own per-bin group-CV+ model; thinner or unknown bins
+fall back to the pooled model. The bin rule is fixed on
+ductile-to-brittle-transition physics and is not tuned against
+calibration results; tuning it would void the calibration story. The
+per-bin provable floors (which are lower than the pooled one, since
+each bin has fewer rows) are reported in the model card.
+
+### 4.6 Model selection and selection-inclusive evidence
+
+The base regressor (HistGradientBoosting, ExtraTrees, a blend of the
+two, RandomForest, Ridge) is selected by the median out-of-fold
+group-CV MAE across several fold seeds. At this n the gap between
+candidates is smaller than the seed-to-seed noise of a single
+candidate, so a single-seed argmin is close to a coin flip; the median
+stabilizes it and every per-seed value is recorded in the model card.
+
+The calibration evidence is nested: each of the evaluation splits
+holds out about 20% of the groups, re-runs the candidate selection on
+the remaining groups only, fits the Mondrian conformal model, and
+scores the held-out groups. The reported numbers therefore describe
+the deployed pipeline including its data-driven choices, not a single
+pre-chosen model evaluated optimistically after the fact. Covered
+indicators are pooled across splits (never averaged as per-split
+rates, which would weight splits unevenly and hide thin cells) and
+reported with exact Clopper-Pearson 95% bands at a ladder of four
+alphas (0.32, 0.20, 0.10, 0.05).
+
+### 4.7 Conditional coverage audit
+
+At the single pre-registered alpha of 0.10, coverage is broken out by
+fixed specimen attributes: phase bin, geometry class (indentation vs
+specimen), toughness measure type, and temperature regime (below,
+at, above room temperature). Strata with fewer than 15 rows or 5
+groups are flagged insufficient rather than scored; rows within one
+publication are correlated, so the group counts are the better guide
+to information content. The audit makes miscalibration visible; it
+makes no validity claim of its own.
+
+### 4.8 Replicate scatter decomposition
+
+On (composition, test temperature) clusters reported by more than one
+publication, the model card records the mean within-publication and
+between-publication standard deviations of log(1 + K). The between-lab
+component is irreducible at query time: nominally identical alloys
+from different labs genuinely differ by this much, and no
+composition-based model can resolve which lab a new measurement will
+agree with. This number is the honest context for any complaint that
+intervals are wide.
 
 ## 5. Applicability domain (src/applicability.py)
 
@@ -494,6 +560,9 @@ Limitations, consistent with the README:
   (2023). Data: Materials Cloud, doi:10.24435/materialscloud:d6-pf.
 - Barber, Candes, Ramdas, Tibshirani. Predictive inference with the
   jackknife+. Annals of Statistics 49(1), 2021.
+- Dunn, Wasserman, Ramdas. Distribution-free prediction sets for
+  two-layer hierarchical models. JASA, 2022 (basis for the subsampled
+  one-row-per-publication reference).
 - Takeuchi, Inoue. Classification of bulk metallic glasses by atomic
   size difference, heat of mixing and period of constituent elements.
   Materials Transactions 46(12), 2005.
