@@ -1,10 +1,16 @@
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from src.certify import certify_dataframe, load_run
 from src.report import render_report
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_qualify_writes_artifact(pipeline):
@@ -80,3 +86,41 @@ def test_certify_handles_raw_columns(pipeline):
     stripped = unseen_df.drop(columns=[c for c in unseen_df.columns if c.startswith("phys_")])
     out, _ = certify_dataframe(stripped, run)
     assert np.isfinite(out["predicted_toughness_mpa_m0_5"]).all()
+
+
+def test_cli_artifact_loads_across_processes(pipeline, tmp_path):
+    """Regression: an artifact written by `python -m src.qualify` must be
+    loadable from another process. Module-as-__main__ pickling broke this."""
+    tmp, _, _ = pipeline
+    from tests.conftest import TARGET, feature_lists
+
+    train_csv = tmp / "train.csv"
+    num, cat = feature_lists(pd.read_csv(train_csv))
+    cfg = {
+        "seed": 0,
+        "data": {
+            "train_csv": str(train_csv),
+            "target": TARGET,
+            "numerical_features": num,
+            "categorical_features": cat,
+            "target_transform": "log1p",
+            "target_standardize": True,
+        },
+        "model": {"auto": {"candidates": ["ridge"]}},
+        "conformal": {"n_folds": 3, "eval_splits": 1},
+        "outputs": {
+            "run_dir": str(tmp_path / "runs"),
+            "scaler": "scaler.joblib",
+            "encoder": "encoder.joblib",
+        },
+    }
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, "-m", "src.qualify", "--config", str(cfg_path)],
+        cwd=ROOT, capture_output=True, text=True, timeout=300,
+    )
+    assert proc.returncode == 0, proc.stderr
+    run_dir = json.loads(proc.stdout)["run_dir"]
+    run = load_run(str(ROOT / run_dir) if not Path(run_dir).is_absolute() else run_dir)
+    assert run["model_card"]["model_selection"]["selected"] == "ridge"

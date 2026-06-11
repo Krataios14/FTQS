@@ -281,4 +281,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Run through the canonical module so SkModelFactory instances are
+    # pickled as src.qualify.SkModelFactory, not __main__.SkModelFactory,
+    # and stay loadable from src.certify.
+    import src.qualify as _canonical
+
+    _canonical.main()
