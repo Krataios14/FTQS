@@ -244,6 +244,24 @@ def composition_descriptors(comp: Dict[str, float]) -> Dict[str, float]:
     return out
 
 
+def brittleness_bin(phase: object) -> str:
+    """Pre-committed Mondrian bin from the reported phase structure.
+
+    FCC-containing alloys stay tough or get tougher toward cryogenic
+    temperatures, while BCC-only, intermetallic, boride and carbide
+    structures embrittle below their (alloy-specific) transition. The
+    two classes have very different toughness scatter, so conformal
+    calibration is done per class. The rule is fixed on this physical
+    ground and must not be tuned against calibration results.
+    """
+    if phase is None or (isinstance(phase, float) and math.isnan(phase)):
+        return "unknown"
+    s = str(phase).strip().lower()
+    if not s or s == "nan":
+        return "unknown"
+    return "ductile" if "fcc" in s else "brittle"
+
+
 # Mechanics features: name -> (required normalized columns, function)
 def _mechanics_features(df: pd.DataFrame, tm_mix: pd.Series) -> Dict[str, pd.Series]:
     nan_series = pd.Series(np.nan, index=df.index)

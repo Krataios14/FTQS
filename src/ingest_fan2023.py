@@ -156,6 +156,36 @@ def _col(ft: pd.DataFrame, prefix: str) -> str:
     return matches[0]
 
 
+def geometry_class(raw: object) -> str:
+    """Normalize the source's specimen geometry into a small vocabulary.
+
+    The distinction that matters most is indentation-derived toughness
+    (Vickers crack methods; 77 of the 148 source records) versus
+    fracture-mechanics specimens: the two are different measurands with
+    different systematic offsets and scatter, so the class is kept as a
+    model feature and an audit stratum.
+    """
+    if pd.isna(raw):
+        return "unknown"
+    s = str(raw).strip().lower()
+    if not s:
+        return "unknown"
+    if "indent" in s:
+        return "indentation"
+    if "cantilever" in s:
+        return "cantilever"
+    if s in ("ct", "c(t)") or "compact" in s:
+        return "compact_tension"
+    if any(t in s for t in ("senb", "sevnb", "cvnrb", "bend")):
+        return "bend"
+    return "other"
+
+
+def group_key(reference: object, composition: object) -> str:
+    """Provenance group identity: source publication plus composition."""
+    return f"{str(reference)[:60]}|{str(composition)}"
+
+
 def convert_fracture_sheet(xlsx_path: str) -> pd.DataFrame:
     ft = pd.read_excel(xlsx_path, sheet_name="Fracture toughness", header=0)
     ft.columns = [str(c).strip() for c in ft.columns]
@@ -209,6 +239,7 @@ def convert_fracture_sheet(xlsx_path: str) -> pd.DataFrame:
                 "Testing_temperature_K": temp,
                 "Fracture_toughness_MPa_m0.5": k,
                 "Toughness_measure": measure,
+                "Test_geometry": geometry_class(r[_col(ft, "Sample geom")]),
                 "Toughness_uncertainty_MPa_m0.5": k_u,
                 "Reference": r["Reference"],
             }
@@ -302,27 +333,24 @@ def convert_impact_toughness_sheet(xlsx_path: str) -> pd.DataFrame:
     )
 
 
-def split_unseen(df: pd.DataFrame, unseen_keys: list) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Pin the unseen split: match each key once by (K, T, reference prefix)."""
-    df = df.reset_index(drop=True)
-    used = set()
-    unseen_idx = []
-    for key in unseen_keys:
-        for i, row in df.iterrows():
-            if i in used:
-                continue
-            k = row["Fracture_toughness_MPa_m0.5"]
-            t = row["Testing_temperature_K"]
-            if not (np.isfinite(k) and np.isfinite(t)):
-                continue
-            if round(k, 2) == key["k"] and round(t, 0) == key["temp"] and str(
-                row["Reference"]
-            ).startswith(key["ref_prefix"][:20]):
-                used.add(i)
-                unseen_idx.append(i)
-                break
-    unseen = df.loc[unseen_idx]
-    train = df.drop(index=unseen_idx)
+def split_unseen_groups(
+    df: pd.DataFrame, unseen_groups: list
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Pin the unseen split at the group level.
+
+    A row is held out if its (reference, composition) group key matches
+    a pinned entry. Whole groups move together, so no publication+alloy
+    combination ever appears on both sides of the split. The earlier
+    row-level split leaked 9 group keys across the boundary, which made
+    the 'unseen' evaluation easier than a genuinely new material system.
+    """
+    keys = df.apply(
+        lambda r: group_key(r["Reference"], r["Composition (at. %)"]), axis=1
+    )
+    pinned = {g["key"] for g in unseen_groups}
+    mask = keys.isin(pinned)
+    unseen = df[mask]
+    train = df[~mask]
     return train.reset_index(drop=True), unseen.reset_index(drop=True)
 
 
@@ -330,7 +358,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--xlsx", default="assets/fan2023_hea_toughness.xlsx")
     parser.add_argument("--manual", default="assets/manual_records.csv")
-    parser.add_argument("--unseen-keys", default="assets/unseen_keys.json")
+    parser.add_argument("--unseen-groups", default="assets/unseen_groups.json")
     parser.add_argument("--out-train", default="assets/combined_fracture_training.csv")
     parser.add_argument("--out-unseen", default="assets/combined_fracture_unseen.csv")
     parser.add_argument("--impact-energy-out", default="assets/hea_impact_energy.csv")
@@ -342,9 +370,16 @@ def main() -> None:
     combined = pd.concat([converted, manual], ignore_index=True)
     combined = combined[combined["Fracture_toughness_MPa_m0.5"].notna()].reset_index(drop=True)
 
-    with open(args.unseen_keys, "r", encoding="utf-8") as f:
-        unseen_keys = json.load(f)
-    train, unseen = split_unseen(combined, unseen_keys)
+    with open(args.unseen_groups, "r", encoding="utf-8") as f:
+        unseen_groups = json.load(f)["groups"]
+    train, unseen = split_unseen_groups(combined, unseen_groups)
+
+    # Hard invariant: the split is group-disjoint.
+    kt = set(train.apply(lambda r: group_key(r["Reference"], r["Composition (at. %)"]), axis=1))
+    ku = set(unseen.apply(lambda r: group_key(r["Reference"], r["Composition (at. %)"]), axis=1))
+    overlap = kt & ku
+    if overlap:
+        raise RuntimeError(f"train/unseen share {len(overlap)} group keys: {sorted(overlap)[:3]}")
 
     train.to_csv(args.out_train, index=False)
     unseen.to_csv(args.out_unseen, index=False)

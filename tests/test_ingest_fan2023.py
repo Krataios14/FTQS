@@ -8,10 +8,11 @@ from src.ingest_fan2023 import (
     convert_fracture_sheet,
     convert_impact_energy_sheet,
     convert_impact_toughness_sheet,
+    geometry_class,
     j_to_k,
     parse_formula,
     parse_value_pm,
-    split_unseen,
+    split_unseen_groups,
     to_at_percent_string,
 )
 from src.physics import parse_composition
@@ -88,19 +89,46 @@ def test_convert_real_sheet():
     assert (kq["Testing_temperature_K"] < 250).any()
 
 
-def test_split_unseen_pins_rows():
+def test_split_unseen_groups_moves_whole_groups():
     df = pd.DataFrame(
         {
-            "Fracture_toughness_MPa_m0.5": [10.0, 20.0, 20.0, 30.0],
-            "Testing_temperature_K": [298.0, 298.0, 77.0, 298.0],
-            "Reference": ["Paper A long title", "Paper B", "Paper B", "Paper C"],
+            "Composition (at. %)": ["Fe50.00-Ni50.00"] * 3 + ["Al100.00"],
+            "Fracture_toughness_MPa_m0.5": [10.0, 20.0, 30.0, 40.0],
+            "Reference": ["Paper B", "Paper B", "Paper C", "Paper C"],
         }
     )
-    keys = [{"k": 20.0, "temp": 77.0, "ref_prefix": "Paper B"}]
-    train, unseen = split_unseen(df, keys)
-    assert len(unseen) == 1
-    assert unseen.iloc[0]["Testing_temperature_K"] == 77.0
-    assert len(train) == 3
+    from src.ingest_fan2023 import group_key
+
+    pinned = [{"key": group_key("Paper B", "Fe50.00-Ni50.00")}]
+    train, unseen = split_unseen_groups(df, pinned)
+    # Both Paper B rows of that composition move together
+    assert len(unseen) == 2
+    assert (unseen["Reference"] == "Paper B").all()
+    assert len(train) == 2
+
+
+def test_geometry_class():
+    assert geometry_class("indentation") == "indentation"
+    assert geometry_class("SENB") == "bend"
+    assert geometry_class("SEVNB") == "bend"
+    assert geometry_class("C(T)") == "compact_tension"
+    assert geometry_class("CT") == "compact_tension"
+    assert geometry_class("cantilever beams") == "cantilever"
+    assert geometry_class(float("nan")) == "unknown"
+
+
+def test_bundled_split_is_group_disjoint():
+    from src.ingest_fan2023 import group_key
+
+    tr = pd.read_csv(ROOT / "assets" / "combined_fracture_training.csv")
+    un = pd.read_csv(ROOT / "assets" / "combined_fracture_unseen.csv")
+    kt = {group_key(r, c) for r, c in zip(tr["Reference"], tr["Composition (at. %)"])}
+    ku = {group_key(r, c) for r, c in zip(un["Reference"], un["Composition (at. %)"])}
+    assert not (kt & ku)
+    assert len(un) >= 14
+    # Geometry class is recorded for source-derived rows
+    assert "Test_geometry" in tr.columns
+    assert (tr["Test_geometry"] == "indentation").sum() >= 60
 
 
 def test_convert_impact_energy_real_sheet():

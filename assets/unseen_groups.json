@@ -1,0 +1,60 @@
+{
+ "procedure": "Group-disjoint holdout pinned for reproducible evaluation. Groups are (reference[:60] | composition) keys with 1-3 rows each, sampled with numpy RandomState(42) over the key-sorted eligible pool, stratified by brittleness bin with row targets ductile>=8, brittle>=6, unknown>=2. Selected once on 2026-06-10 and frozen; do not regenerate when data is added, append new groups instead.",
+ "groups": [
+  {
+   "key": "Mohanty, S., Maity, T. N., Mukhopadhyay, S., Sarkar, S., Gur|Al20.00-Co20.00-Cr20.00-Fe20.00-Ni20.00",
+   "bin": "ductile",
+   "n_rows": 2
+  },
+  {
+   "key": "Yadav, S., Sarkar, S., Aggarwal, A., Kumar, A. & Biswas, K. |Cr18.00-Cu18.00-Fe18.00-Pb10.00-Ti18.00-Zn18.00",
+   "bin": "ductile",
+   "n_rows": 1
+  },
+  {
+   "key": "Yang, S., Xiong, J., Guo, Z., Wu, B., Yang, T. e., You, Q., |C37.00-Mo20.00-N3.00-Ni10.00-Ta10.00-Ti10.00-W10.00",
+   "bin": "ductile",
+   "n_rows": 1
+  },
+  {
+   "key": "Jiang, H., Ni, Z., Wang, J., Li, L., Huang, T., Han, K., Zha|Co22.47-Cr22.47-Fe22.47-Nb10.11-Ni22.47",
+   "bin": "ductile",
+   "n_rows": 1
+  },
+  {
+   "key": "Yadav, S., Sarkar, S., Aggarwal, A., Kumar, A. & Biswas, K. |Cr20.00-Cu20.00-Fe20.00-Ti20.00-Zn20.00",
+   "bin": "ductile",
+   "n_rows": 1
+  },
+  {
+   "key": "Ganji, R. S., Rajulapati, K. V. & Rao, K. Development of a m|Al20.00-Cu20.00-Ta20.00-V20.00-W20.00",
+   "bin": "ductile",
+   "n_rows": 1
+  },
+  {
+   "key": "Liu, D., Yu, Q., Kabra, S., Jiang, M., Forna-Kreutzer, P., Z|Co33.33-Cr33.33-Ni33.33",
+   "bin": "ductile",
+   "n_rows": 1
+  },
+  {
+   "key": "Roy, U., Roy, H., Daoud, H., Glatzel, U. & Ray, K. K. Fractu|Al23.23-Co15.15-Cr23.23-Cu8.08-Fe15.15-Ni15.15",
+   "bin": "brittle",
+   "n_rows": 2
+  },
+  {
+   "key": "Xiao, Y., Zou, Y., Ma, H., Sologubenko, A. S., Maeder, X., S|Mo25.00-Nb25.00-Ta25.00-W25.00",
+   "bin": "brittle",
+   "n_rows": 3
+  },
+  {
+   "key": "Long, Y., Zhang, G., Chen, J., Datye, A., Zhang, S., Schwarz|Al16.67-B16.67-Co16.67-Cr16.67-Fe16.67-Ni16.67",
+   "bin": "brittle",
+   "n_rows": 1
+  },
+  {
+   "key": "Dynamic Metals article|nan",
+   "bin": "unknown",
+   "n_rows": 2
+  }
+ ]
+}
