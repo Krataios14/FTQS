@@ -14,7 +14,7 @@ computes those bounds from measured samples:
 Intended use here: compute screening allowables from physical test
 results and compare them against the model's conformal lower bounds.
 Model outputs are *screening* values for test planning and material
-down-selection -- they do not replace MMPDS/CMH-17 qualification.
+down-selection. They do not replace MMPDS/CMH-17 qualification.
 """
 
 from __future__ import annotations

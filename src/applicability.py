@@ -1,7 +1,7 @@
 """Applicability-domain scoring: when can a prediction be trusted?
 
 A model trained on 131 literature datapoints will happily extrapolate
-into composition/processing regimes it has never seen -- silently. This
+into composition/processing regimes it has never seen, silently. This
 module makes that visible. Each query is scored by its distance to the
 training distribution (k-nearest-neighbour distance in standardized
 feature space, calibrated against the training set's own leave-one-out
@@ -9,8 +9,8 @@ neighbour distances) and assigned a trust tier:
 
 - Tier A (interpolation): closer than 80% of training self-distances.
 - Tier B (boundary): between the 80th and 97.5th percentile.
-- Tier C (extrapolation): beyond the 97.5th percentile -- the model is
-  guessing; conformal guarantees assume exchangeability and weaken here.
+- Tier C (extrapolation): beyond the 97.5th percentile. The model is
+  guessing here, and the conformal exchangeability assumption is weak.
 
 Every query can also be traced to its nearest training specimens,
 including the source publication, so a prediction is auditable:

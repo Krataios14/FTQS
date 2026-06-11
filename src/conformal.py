@@ -8,8 +8,8 @@ valid at any sample size and for any underlying regressor.
 
 The group-aware variant folds the data by *group* (here: source
 publication / alloy) rather than by row. Literature-mined materials
-datasets are clustered -- several specimens per paper share lab, method
-and material -- so row-level exchangeability is violated and naive
+datasets are clustered (several specimens per paper share lab, method
+and material), so row-level exchangeability is violated and naive
 conformal intervals are overconfident for genuinely new alloys.
 Group-level folding restores exchangeability at the level that matters:
 "a material system we have never seen".
@@ -148,6 +148,7 @@ def evaluate_group_coverage(
     test_fraction: float = 0.2,
     n_folds: int = 8,
     seed: int = 42,
+    inverse_transform: Optional[Callable[[np.ndarray], np.ndarray]] = None,
 ) -> Dict[str, float]:
     """Held-out-group calibration evidence.
 
@@ -156,6 +157,11 @@ def evaluate_group_coverage(
     interval width and point accuracy on the unseen groups. This is the
     honest estimate of how the tool behaves on a material system it has
     never encountered.
+
+    If the model is trained on a transformed target, pass
+    `inverse_transform` (must be monotone increasing): coverage is
+    invariant under it, while widths and point metrics are reported in
+    original units.
     """
     X = np.asarray(X, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64).ravel()
@@ -175,11 +181,17 @@ def evaluate_group_coverage(
         model.fit(X[~test_mask], y[~test_mask], groups=groups[~test_mask])
         lower, upper = model.predict_interval(X[test_mask], alpha=alpha)
         preds = model.predict(X[test_mask])
-        m = interval_metrics(y[test_mask], lower, upper)
+        y_test = y[test_mask]
+        if inverse_transform is not None:
+            lower = inverse_transform(lower)
+            upper = inverse_transform(upper)
+            preds = inverse_transform(preds)
+            y_test = inverse_transform(y_test)
+        m = interval_metrics(y_test, lower, upper)
         coverages.append(m["coverage"])
         widths.append(m["mean_width"])
-        maes.append(mean_absolute_error(y[test_mask], preds))
-        all_true.append(y[test_mask])
+        maes.append(mean_absolute_error(y_test, preds))
+        all_true.append(y_test)
         all_pred.append(preds)
 
     if not coverages:
