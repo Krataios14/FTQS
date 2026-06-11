@@ -13,7 +13,10 @@ advise: rank candidate test articles by how much a physical test would
 be worth. The score combines relative interval width with distance from
 the training distribution, so the suggested tests are the ones that
 shrink model uncertainty where it is largest. Fracture toughness tests
-are expensive; this is the test-matrix reduction tool.
+are expensive; this is the test-matrix reduction tool. By default the
+advised batch is also diversified in feature space, so a small test
+budget is not spent on near-replicas of one alloy (--no-diversify
+restores plain score ordering).
 
 Usage:
     python -m src.screen --mode screen --temperature 298 --top 20
@@ -30,8 +33,9 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from src.certify import certify_dataframe, latest_qualify_run, load_run
+from src.certify import _ensure_columns, certify_dataframe, latest_qualify_run, load_run
 from src.physics import add_physics_features, parse_composition
+from src.qualify import build_matrix
 
 
 def _format_composition(comp: Dict[str, float]) -> str:
@@ -120,8 +124,41 @@ def screen_candidates(
     return out.reset_index(drop=True)
 
 
-def advise_tests(data: pd.DataFrame, run: Dict, top: int = 10) -> pd.DataFrame:
-    """Rank candidate test articles by expected value of a physical test."""
+def _standardized_features(data: pd.DataFrame, run: Dict) -> np.ndarray:
+    """Feature rows in the trust model's standardized space.
+
+    Builds the matrix exactly as certify does, then applies the same
+    median-fill / robust-scale arithmetic the fitted trust model uses.
+    """
+    features = run["features"]
+    frame = _ensure_columns(data, features)
+    X = build_matrix(
+        frame, features["numerical_features"], features["categorical_features"], run["artifacts"]
+    )
+    trust = run["trust"]
+    X = np.asarray(X, dtype=np.float64)
+    X = np.where(np.isfinite(X), X, np.nan)
+    filled = np.where(np.isnan(X), trust.median_, X)
+    return (filled - trust.center_) / trust.scale_
+
+
+def advise_tests(
+    data: pd.DataFrame, run: Dict, top: int = 10, diversify: bool = True
+) -> pd.DataFrame:
+    """Rank candidate test articles by expected value of a physical test.
+
+    With diversify=True (the default) the batch is spread out in the trust
+    model's standardized feature space: candidates are taken in score order,
+    and after the first pick a candidate is only accepted if its minimum
+    Euclidean distance to everything already accepted is at least tau, the
+    median training self-distance. Tests are bought in small batches, and a
+    batch of near-replicas of one alloy wastes most of it. If too few
+    candidates satisfy the spacing rule, the batch is topped up in plain
+    score order and those rows carry diversity_relaxed=True. The diversified
+    frame adds 'min_distance_to_selected' (NaN for the first pick) and
+    'diversity_relaxed' columns; diversify=False returns the plain ranking
+    unchanged.
+    """
     out, _ = certify_dataframe(data, run)
     pred = out["predicted_toughness_mpa_m0_5"].to_numpy()
     width = out["upper_90"].to_numpy() - out["lower_90"].to_numpy()
@@ -129,8 +166,48 @@ def advise_tests(data: pd.DataFrame, run: Dict, top: int = 10) -> pd.DataFrame:
     novelty = (100.0 - out["trust_score"].to_numpy()) / 100.0
     out["relative_interval_width"] = rel_width
     out["test_value_score"] = rel_width * (1.0 + novelty)
-    out = out.sort_values("test_value_score", ascending=False).head(top)
-    return out.reset_index(drop=True)
+    if not diversify:
+        out = out.sort_values("test_value_score", ascending=False).head(top)
+        return out.reset_index(drop=True)
+
+    Z = _standardized_features(data, run)
+    tau = float(np.median(run["trust"].train_self_dist_))
+    out = out.reset_index(drop=True)  # positions now align with Z rows
+    order = out.sort_values("test_value_score", ascending=False).index.to_numpy()
+
+    # Greedy pass: skipped candidates never become eligible again because
+    # adding picks can only shrink a candidate's minimum distance.
+    accepted: List[int] = []
+    skipped: List[int] = []
+    min_dist: Dict[int, float] = {}
+    for idx in order:
+        if len(accepted) >= top:
+            break
+        idx = int(idx)
+        if not accepted:
+            accepted.append(idx)
+            min_dist[idx] = float("nan")
+            continue
+        d = float(min(np.linalg.norm(Z[idx] - Z[j]) for j in accepted))
+        if d >= tau:
+            accepted.append(idx)
+            min_dist[idx] = d
+        else:
+            skipped.append(idx)
+
+    relaxed = set()
+    for idx in skipped:
+        if len(accepted) >= top:
+            break
+        d = float(min(np.linalg.norm(Z[idx] - Z[j]) for j in accepted))
+        accepted.append(idx)
+        min_dist[idx] = d
+        relaxed.add(idx)
+
+    result = out.loc[accepted].copy()
+    result["min_distance_to_selected"] = [min_dist[i] for i in accepted]
+    result["diversity_relaxed"] = [i in relaxed for i in accepted]
+    return result.reset_index(drop=True)
 
 
 def main() -> None:
@@ -145,6 +222,11 @@ def main() -> None:
     parser.add_argument("--n-per-base", type=int, default=20)
     parser.add_argument("--jitter", type=float, default=0.15)
     parser.add_argument("--top", type=int, default=20)
+    parser.add_argument(
+        "--no-diversify",
+        action="store_true",
+        help="advise: rank purely by score instead of spacing the batch",
+    )
     parser.add_argument("--out", type=str, default="screening_results.csv")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -156,7 +238,7 @@ def main() -> None:
         if not args.data:
             raise SystemExit("--data is required for advise mode")
         data = pd.read_csv(args.data, skip_blank_lines=True)
-        result = advise_tests(data, run, top=args.top)
+        result = advise_tests(data, run, top=args.top, diversify=not args.no_diversify)
     else:
         if args.data:
             candidates = pd.read_csv(args.data, skip_blank_lines=True)
