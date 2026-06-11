@@ -24,13 +24,21 @@ assets/manual_records.csv and are merged in unchanged. The unseen
 split is pinned by assets/unseen_keys.json so evaluation stays
 comparable across dataset revisions.
 
+The spreadsheet's two Charpy sheets ('Impact energy', 78 records, in
+J; 'Impact toughness', 14 records, in kJ/m2) are converted with the
+same composition and property parsing and written as standalone
+companion assets. They are not merged into the fracture toughness
+splits.
+
 Usage:
     python -m src.ingest_fan2023 ^
       --xlsx assets/fan2023_hea_toughness.xlsx ^
       --manual assets/manual_records.csv ^
       --unseen-keys assets/unseen_keys.json ^
       --out-train assets/combined_fracture_training.csv ^
-      --out-unseen assets/combined_fracture_unseen.csv
+      --out-unseen assets/combined_fracture_unseen.csv ^
+      --impact-energy-out assets/hea_impact_energy.csv ^
+      --impact-toughness-out assets/hea_impact_toughness.csv
 """
 
 from __future__ import annotations
@@ -211,6 +219,89 @@ def convert_fracture_sheet(xlsx_path: str) -> pd.DataFrame:
     return out
 
 
+def _convert_impact_sheet(
+    xlsx_path: str,
+    sheet_name: str,
+    target_prefix: str,
+    target_col: str,
+    uncertainty_col: str,
+) -> pd.DataFrame:
+    """Convert one of the two Charpy sheets; they share a layout.
+
+    Unlike the fracture sheet there is no 'Hardness (GPa)' column, so
+    hardness always comes from HV.
+    """
+    sheet = pd.read_excel(xlsx_path, sheet_name=sheet_name, header=0)
+    sheet.columns = [str(c).strip() for c in sheet.columns]
+
+    rows = []
+    skipped = []
+    for _, r in sheet.iterrows():
+        target, target_u = parse_value_pm(r[_col(sheet, target_prefix)])
+        if not np.isfinite(target):
+            skipped.append(r["ID"])
+            continue
+
+        hv, _ = parse_value_pm(r[_col(sheet, "Hardness (HV)")])
+        h_gpa = hv * 0.009807 if np.isfinite(hv) else float("nan")  # HV (kgf/mm^2) to GPa
+
+        grain, _ = parse_value_pm(r[_col(sheet, "Grain size")])
+        ys, _ = parse_value_pm(r[_col(sheet, "Tensile YS")])
+        uts, _ = parse_value_pm(r[_col(sheet, "UTS")])
+        elong, _ = parse_value_pm(r[_col(sheet, "Final elongation")])
+        temp, _ = parse_value_pm(r[_col(sheet, "Testing temperature")])
+
+        rows.append(
+            {
+                "Composition (at. %)": to_at_percent_string(parse_formula(r["Composition"])),
+                "Material condition": r["Material condition"],
+                "Processing history": r["Processing history"],
+                "Phase": r["Phase"],
+                "Grain_size_um": grain,
+                "Hardness_GPa": h_gpa,
+                "Yield_strength_MPa": ys,
+                "UTS_MPa": uts,
+                "Final_elongation_percent": elong,
+                "Testing_temperature_K": temp,
+                target_col: target,
+                uncertainty_col: target_u,
+                "Test_type": r[_col(sheet, "Test type")],
+                "Standard_followed": r[_col(sheet, "Standard followed")],
+                "Reference": r["Reference"],
+            }
+        )
+    out = pd.DataFrame(rows)
+    if skipped:
+        print(f"skipped {len(skipped)} '{sheet_name}' records with no usable value: IDs {skipped}")
+    return out
+
+
+def convert_impact_energy_sheet(xlsx_path: str) -> pd.DataFrame:
+    """Convert the 'Impact energy' sheet (Charpy absorbed energy in J)."""
+    return _convert_impact_sheet(
+        xlsx_path,
+        sheet_name="Impact energy",
+        target_prefix="Impact energy",
+        target_col="Impact_energy_J",
+        uncertainty_col="Impact_energy_uncertainty_J",
+    )
+
+
+def convert_impact_toughness_sheet(xlsx_path: str) -> pd.DataFrame:
+    """Convert the 'Impact toughness' sheet.
+
+    The sheet reports impact toughness in kJ/m2 (not J/cm2; 1 J/cm2 =
+    10 kJ/m2), so the output column keeps the source unit.
+    """
+    return _convert_impact_sheet(
+        xlsx_path,
+        sheet_name="Impact toughness",
+        target_prefix="Impact toughness",
+        target_col="Impact_toughness_kJ_m2",
+        uncertainty_col="Impact_toughness_uncertainty_kJ_m2",
+    )
+
+
 def split_unseen(df: pd.DataFrame, unseen_keys: list) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Pin the unseen split: match each key once by (K, T, reference prefix)."""
     df = df.reset_index(drop=True)
@@ -242,6 +333,8 @@ def main() -> None:
     parser.add_argument("--unseen-keys", default="assets/unseen_keys.json")
     parser.add_argument("--out-train", default="assets/combined_fracture_training.csv")
     parser.add_argument("--out-unseen", default="assets/combined_fracture_unseen.csv")
+    parser.add_argument("--impact-energy-out", default="assets/hea_impact_energy.csv")
+    parser.add_argument("--impact-toughness-out", default="assets/hea_impact_toughness.csv")
     args = parser.parse_args()
 
     converted = convert_fracture_sheet(args.xlsx)
@@ -255,6 +348,12 @@ def main() -> None:
 
     train.to_csv(args.out_train, index=False)
     unseen.to_csv(args.out_unseen, index=False)
+
+    impact_energy = convert_impact_energy_sheet(args.xlsx)
+    impact_toughness = convert_impact_toughness_sheet(args.xlsx)
+    impact_energy.to_csv(args.impact_energy_out, index=False)
+    impact_toughness.to_csv(args.impact_toughness_out, index=False)
+
     print(
         json.dumps(
             {
@@ -262,6 +361,8 @@ def main() -> None:
                 "manual": int(len(manual)),
                 "train": int(len(train)),
                 "unseen": int(len(unseen)),
+                "impact_energy": int(len(impact_energy)),
+                "impact_toughness": int(len(impact_toughness)),
                 "measures": combined["Toughness_measure"].fillna("manual").value_counts().to_dict(),
             },
             indent=2,

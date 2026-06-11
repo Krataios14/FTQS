@@ -6,6 +6,8 @@ import pytest
 
 from src.ingest_fan2023 import (
     convert_fracture_sheet,
+    convert_impact_energy_sheet,
+    convert_impact_toughness_sheet,
     j_to_k,
     parse_formula,
     parse_value_pm,
@@ -99,3 +101,29 @@ def test_split_unseen_pins_rows():
     assert len(unseen) == 1
     assert unseen.iloc[0]["Testing_temperature_K"] == 77.0
     assert len(train) == 3
+
+
+def test_convert_impact_energy_real_sheet():
+    df = convert_impact_energy_sheet(str(XLSX))
+    # 78 source records, all carry a Charpy energy value
+    assert len(df) >= 70
+    for comp in df["Composition (at. %)"]:
+        total = sum(parse_composition(comp).values())
+        assert total == pytest.approx(100.0, abs=0.2)
+    e = df["Impact_energy_J"]
+    assert np.isfinite(e).all() and (e > 0).all()
+    t = df["Testing_temperature_K"]
+    assert ((t >= 4.0) & (t <= 1700.0)).all()
+
+
+def test_convert_impact_toughness_real_sheet():
+    df = convert_impact_toughness_sheet(str(XLSX))
+    # 14 source records, reported in kJ/m2
+    assert len(df) >= 12
+    for comp in df["Composition (at. %)"]:
+        total = sum(parse_composition(comp).values())
+        assert total == pytest.approx(100.0, abs=0.2)
+    it = df["Impact_toughness_kJ_m2"]
+    assert np.isfinite(it).all() and (it > 0).all()
+    t = df["Testing_temperature_K"]
+    assert ((t >= 4.0) & (t <= 1700.0)).all()
