@@ -12,7 +12,9 @@ from src.physics import add_physics_features, parse_composition
 
 
 COMPOSITION_COL = "composition_at_percent"
-METADATA_COLS = ["reference", COMPOSITION_COL]
+# Provenance and measurement metadata: carried through for traceability,
+# never used as model features.
+METADATA_COLS = ["reference", COMPOSITION_COL, "toughness_uncertainty_mpa_m0_5"]
 
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:

@@ -1,0 +1,77 @@
+[
+ {
+  "k": 10.6,
+  "temp": 298.0,
+  "ref_prefix": "Nair, R. B., Arora, H. S., Boyana, A. V."
+ },
+ {
+  "k": 9.6,
+  "temp": 298.0,
+  "ref_prefix": "Solodkyi, I., Teslia, S., Bezdorozhev, O"
+ },
+ {
+  "k": 9.71,
+  "temp": 298.0,
+  "ref_prefix": "Luo, W., Liu, Y., Luo, Y. & Wu, M. Fabri"
+ },
+ {
+  "k": 1.0,
+  "temp": 298.0,
+  "ref_prefix": "Mohanty, S., Maity, T. N., Mukhopadhyay,"
+ },
+ {
+  "k": 219.0,
+  "temp": 298.0,
+  "ref_prefix": "Jo, Y. H., Doh, K.-Y., Kim, D. G., Lee, "
+ },
+ {
+  "k": 10.41,
+  "temp": 298.0,
+  "ref_prefix": "Wu, Z., Chen, Y., Hai, W. & Liu, M. Effe"
+ },
+ {
+  "k": 8.98,
+  "temp": 298.0,
+  "ref_prefix": "Luo, W., Liu, Y., Luo, Y. & Wu, M. Fabri"
+ },
+ {
+  "k": 5.93,
+  "temp": 298.0,
+  "ref_prefix": "Liu, Q., Dong, T.-s., Fu, B.-g., Li, G.-"
+ },
+ {
+  "k": 230.0,
+  "temp": 298.0,
+  "ref_prefix": "Jo, Y. H., Yang, J., Doh, K.-Y., An, W.,"
+ },
+ {
+  "k": 3.9,
+  "temp": 298.0,
+  "ref_prefix": "Mohanty, S., Maity, T. N., Mukhopadhyay,"
+ },
+ {
+  "k": 273.3,
+  "temp": 77.0,
+  "ref_prefix": "Gludovatz, B., Hohenwarter, A., Thurston"
+ },
+ {
+  "k": 8.3,
+  "temp": 298.0,
+  "ref_prefix": "Yang, S., Xiong, J., Guo, Z., Wu, B., Ya"
+ },
+ {
+  "k": 82.4,
+  "temp": 298.0,
+  "ref_prefix": "Chromium Nickel Alloys site"
+ },
+ {
+  "k": 4.45,
+  "temp": 298.0,
+  "ref_prefix": "Salemi, F., Karimzadeh, F. & Abbasi, M. "
+ },
+ {
+  "k": 35.0,
+  "temp": 298.0,
+  "ref_prefix": "Ritchie 1976 table II"
+ }
+]
