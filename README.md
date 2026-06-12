@@ -1,6 +1,6 @@
 # Fracture Toughness Qualification Suite (FTQS)
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20669425.svg)](https://doi.org/10.5281/zenodo.20669425)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.20669425-blue)](https://doi.org/10.5281/zenodo.20669425)
 
 Fracture toughness prediction for steels and high entropy alloys, with
 prediction intervals that carry a finite-sample statistical guarantee,
