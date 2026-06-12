@@ -46,7 +46,7 @@ references:
     volume: 10
     year: 2023
     doi: 10.1038/s41597-022-01911-4
-  - type: dataset
+  - type: data
     title: Dataset for fracture and impact toughness of high-entropy alloys (Materials Cloud)
     authors:
       - family-names: Fan
